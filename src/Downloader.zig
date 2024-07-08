@@ -5,7 +5,7 @@ const Downloader = @This();
 path: []const u8 = "",
 filename: []const u8 = "",
 finished: bool = false,
-size: usize = 0,
+size: ?usize = null,
 downloaded: usize = 0,
 spinner: util.Spinner = .{},
 bar: util.ProgressBar = .{},
@@ -19,30 +19,29 @@ pub fn download(url: []const u8, dir: []const u8) !Downloader {
     };
 
     if (util.pathExists(ctx.path)) {
+        try std.io.getStdOut().writer().print("Nothing left to download ({s} exists)\n", .{ctx.path});
         return ctx;
     }
 
-    // std.debug.print("{s}\n", .{ctx.path});
     const uri = try std.Uri.parse(url);
-    try std.fs.cwd().makePath(std.fs.path.dirname(ctx.path) orelse unreachable);
-    const fd = try std.fs.cwd().createFile(ctx.path, .{});
-
-    defer fd.close();
 
     var client = std.http.Client{ .allocator = util.gpa };
     defer client.deinit();
 
     var headerbuf: [1024 * 8]u8 = undefined;
-    var req = try client.open(.GET, uri, .{ .server_header_buffer = &headerbuf, .headers = .{
+    var req = client.open(.GET, uri, .{ .server_header_buffer = &headerbuf, .headers = .{
         .user_agent = .{ .override = "zigman" },
         .accept_encoding = .{ .override = "utf-8" },
-    } });
+    } }) catch |err| {
+        std.log.err("unable to connect to {s}: {s}", .{ url, @errorName(err) });
+        return ctx;
+    };
     defer req.deinit();
 
     try req.send();
     try req.wait();
 
-    ctx.size = @intCast(req.response.content_length orelse 0);
+    ctx.size = if (req.response.content_length) |cl| @intCast(cl) else null;
 
     var update_thread = try std.Thread.spawn(.{}, struct {
         fn func(c: *Downloader) !void {
@@ -65,9 +64,23 @@ pub fn download(url: []const u8, dir: []const u8) !Downloader {
     defer speed_measure_thread.join();
 
     var rdbuf: [512]u8 = undefined;
-    while (ctx.downloaded != ctx.size) {
-        const bytes = req.read(&rdbuf) catch break;
-        ctx.downloaded += try fd.write(rdbuf[0..bytes]);
+    try std.fs.cwd().makePath(std.fs.path.dirname(ctx.path) orelse unreachable);
+    const fd = try std.fs.cwd().createFile(ctx.path, .{});
+
+    defer fd.close();
+
+    if (ctx.size == null) {
+        while (true) {
+            const bytes = req.read(&rdbuf) catch break;
+
+            if (bytes == 0) break;
+            ctx.downloaded += try fd.write(rdbuf[0..bytes]);
+        }
+    } else {
+        while (ctx.downloaded != ctx.size.?) {
+            const bytes = req.read(&rdbuf) catch break;
+            ctx.downloaded += try fd.write(rdbuf[0..bytes]);
+        }
     }
     ctx.finished = true;
     return ctx;
@@ -78,12 +91,12 @@ fn update(self: *@This()) !void {
 
     self.spinner.step();
 
-    self.bar.total = self.size;
+    self.bar.total = self.size orelse 0;
     self.bar.update(self.downloaded);
 
     const dl_units = Units.detect(self.downloaded);
     const downloaded = dl_units.to(self.downloaded);
-    const total = dl_units.to(self.size);
+    const total = dl_units.to(self.size orelse 0);
 
     const dl_speed_units = Units.detect(self.bytes_per_second);
     const dl_speed = dl_speed_units.to(self.bytes_per_second);
@@ -94,9 +107,9 @@ fn update(self: *@This()) !void {
     const bar_str = try self.bar.getString();
     const full_str = try std.fmt.allocPrint(util.gpa, "\r{0s} {1s} {2s} {3s} {4s}", .{
         spinner_str,
-        if (self.finished) "Downloaded" else self.filename,
+        self.filename,
         progress_str,
-        if (self.finished) "" else speed_str,
+        speed_str,
         bar_str,
     });
 
@@ -107,6 +120,7 @@ fn update(self: *@This()) !void {
     defer util.gpa.free(full_str);
 
     try stdout.writeAll(full_str);
+    if (self.finished) try stdout.writeAll("\n");
 }
 
 fn getSpeed(ctx: *@This()) void {

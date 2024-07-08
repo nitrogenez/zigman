@@ -10,10 +10,7 @@ const Winsize = extern struct {
 };
 
 pub fn pathExists(path: []const u8) bool {
-    const f = std.fs.cwd().createFile(path, .{ .exclusive = true }) catch |e| switch (e) {
-        error.PathAlreadyExists => return true,
-        else => return false,
-    };
+    const f = std.fs.cwd().openFile(path, .{}) catch return false;
     f.close();
     return true;
 }
@@ -51,8 +48,8 @@ pub const ProgressBar = struct {
     open: []const u8 = "[",
     close: []const u8 = "]",
     empty_slot: []const u8 = " ",
-    full_slot: []const u8 = "|",
-    caret_slot: []const u8 = "|",
+    full_slot: []const u8 = "#",
+    caret_slot: []const u8 = "#",
     total: usize = 0,
     complete: usize = 0,
     progress: f64 = 0.0,

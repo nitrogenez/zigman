@@ -1,9 +1,9 @@
 const std = @import("std");
-const root = @import("root.zig");
 const builtin = @import("builtin");
 const util = @import("util.zig");
 
-const Compiler = @import("Compiler.zig");
+const index = @import("index.zig");
+const compiler = @import("compiler.zig");
 const Downloader = @import("Downloader.zig");
 
 const Options = struct {
@@ -12,6 +12,7 @@ const Options = struct {
     sys: []const u8 = @tagName(builtin.os.tag),
     version: ?[]const u8 = null,
     zig_root: ?[]const u8 = null,
+    fetch_index: bool = false,
 };
 
 const help =
@@ -22,7 +23,7 @@ const help =
     \\
     \\OPTIONS:
     \\  [-p | --prefix PREFIX]      Zig will be installed in directories relative to PREFIX
-    \\  [-i | --index]              Will fetch zig download index from ziglang.org and print it to stdout
+    \\  [-i | --index]              Will fetch Zig compiler index from ziglang.org and print it to stdout
     \\  [-a | --arch ARCHITECTURE]  Will fetch zig for ARCHITECTURE instead of native one
     \\  [-s | --system SYSTEM]      Will fetch zig for SYSTEM instead of native one
     \\  [-d | --directory DIR]      Will fetch zig compiler to DIR
@@ -46,7 +47,7 @@ pub fn main() !void {
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, "--help", arg) or std.mem.eql(u8, "-h", arg)) {
-            try stdout.print("{s}\n", .{help});
+            try stdout.print("{s}\n\n{s}\n", .{ @import("secret.zig").get(), help });
             return;
         } else if (std.mem.eql(u8, "--prefix", arg) or std.mem.eql(u8, "-p", arg)) {
             opts.prefix = args.next() orelse {
@@ -54,13 +55,7 @@ pub fn main() !void {
                 return;
             };
         } else if (std.mem.eql(u8, "--index", arg) or std.mem.eql(u8, "-i", arg)) {
-            printIndex() catch |e| switch (e) {
-                error.NotOpenForReading => {},
-                else => {
-                    std.log.err("index cannot be retrieved due to {s}", .{@errorName(e)});
-                },
-            };
-            return;
+            opts.fetch_index = true;
         } else if (std.mem.eql(u8, "--arch", arg) or std.mem.eql(u8, "-a", arg)) {
             opts.arch = args.next() orelse {
                 std.log.err("--arch requires value", .{});
@@ -81,37 +76,29 @@ pub fn main() !void {
         }
     }
 
+    if (opts.fetch_index) {
+        const root = opts.zig_root orelse try std.fs.path.join(util.gpa, &.{ std.posix.getenv("HOME") orelse unreachable, ".zigman" });
+        defer util.gpa.free(root);
+
+        try index.fetch(root);
+        try index.print();
+        return;
+    }
+
     if (opts.version == null) {
         std.log.err("no version specified", .{});
         return;
     }
 
-    if (!Compiler.isValidArch(opts.arch)) {
+    if (!compiler.isValidArch(opts.arch)) {
         std.log.err("{s} is not a valid architecture", .{opts.arch});
         return;
     }
-    if (!Compiler.isValidSystemTag(opts.sys)) {
+    if (!compiler.isValidSystemTag(opts.sys)) {
         std.log.err("{s} is not a valid system tag", .{opts.sys});
         return;
     }
+
     const r = opts.zig_root orelse try std.fs.path.join(util.gpa, &.{ std.posix.getenv("HOME") orelse unreachable, ".zigman", opts.version.? });
-    try Compiler.download(r, opts.version.?, opts.arch, opts.sys);
-}
-
-fn printIndex() !void {
-    const f = try root.fetchIndex();
-    defer f.close();
-
-    try f.seekTo(0);
-    var buf: [1024 * 1024 * 2]u8 = undefined;
-    std.debug.print("hi", .{});
-    const bytes = try f.readAll(&buf);
-
-    try std.io.getStdOut().writeAll(buf[0..bytes]);
-    try std.io.getStdOut().writeAll("\n");
-}
-
-fn bToMib(b: usize) f64 {
-    const in: f64 = @floatFromInt(b);
-    return @divTrunc(in, (1024.0 * 1024.0));
+    try compiler.download(r, opts.version.?, opts.arch, opts.sys);
 }

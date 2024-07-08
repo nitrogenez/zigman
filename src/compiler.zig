@@ -14,24 +14,36 @@ pub fn getDownloadUri(version: []const u8, arch: ?[]const u8, sys: ?[]const u8) 
 pub fn download(root: []const u8, version: []const u8, arch: ?[]const u8, sys: ?[]const u8) !void {
     const uri = try getDownloadUri(version, arch, sys);
     const dl = try Downloader.download(uri, root);
-    try std.io.getStdOut().writeAll("\n");
     try unpack(dl.path);
     util.gpa.free(dl.path);
-    try std.io.getStdOut().writeAll("\n");
 }
 
 pub fn unpack(path: []const u8) !void {
-    const f = try std.fs.openFileAbsolute(path, .{});
+    const f = std.fs.openFileAbsolute(path, .{}) catch |err| {
+        std.log.err("Unable to unpack {s}: {s}", .{ path, @errorName(err) });
+        return;
+    };
     defer f.close();
 
     const Ctx = struct {
         unpacked: bool = false,
-        dots: util.Spinner = .{ .frames = &.{ "*  ", "** ", "***" } },
-        spinner: util.Spinner = .{ .frames = &.{ "[>  ]", "[ > ]", "[  >]", "[  <]", "[ < ]", "[<  ]" } },
+        dots: util.Spinner = .{ .frames = &.{ "∙∙∙", "●∙∙", "∙●∙", "∙∙●", "∙∙∙" } },
+        spinner: util.Spinner = .{ .frames = &.{ "[-  ]", "[ = ]", "[  -]", "[ = ]" } },
     };
     var ctx = Ctx{};
 
-    const out_path = path[0 .. std.mem.lastIndexOf(u8, path, ".tar.xz") orelse path.len];
+    const out_path = std.fs.path.dirname(path) orelse unreachable;
+    const unpacked_dir = try std.fs.path.join(util.gpa, &.{
+        out_path,
+        std.fs.path.stem(path[0 .. std.mem.lastIndexOfScalar(u8, path, '.') orelse path.len]),
+    });
+
+    if (util.pathExists(unpacked_dir)) {
+        util.gpa.free(unpacked_dir);
+        try std.io.getStdOut().writeAll("Nothing left to unpack\n");
+        return;
+    }
+
     std.fs.makeDirAbsolute(out_path) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
@@ -42,9 +54,12 @@ pub fn unpack(path: []const u8) !void {
         fn func(c: *Ctx) void {
             while (!c.unpacked) {
                 std.time.sleep(std.time.ns_per_ms * 80);
-                const spinner_str = util.color("green", c.spinner.next()) catch @panic("OOM");
+                const spinner_str = util.color("green", if (c.unpacked) "[DONE]" else c.spinner.next()) catch @panic("OOM");
                 defer util.gpa.free(spinner_str);
-                std.io.getStdOut().writer().print("\r{s} Unpacking {s}", .{ spinner_str, c.dots.next() }) catch unreachable;
+                std.io.getStdOut().writer().print("\r{s} Unpacking (this might take some time) {s}", .{
+                    spinner_str,
+                    if (c.unpacked) "\n" else c.dots.next(),
+                }) catch unreachable;
             }
         }
     }.func, .{&ctx});
