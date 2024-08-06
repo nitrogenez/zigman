@@ -2,6 +2,37 @@ const std = @import("std");
 
 pub const gpa = std.heap.page_allocator;
 
+pub const DataUnits = enum(usize) {
+    B = 0,
+    KiB = 1024,
+    MiB = 1048576,
+    GiB = 1073741824,
+    TiB = 1099511627776,
+
+    pub fn adapt(bytes: usize) f64 {
+        return DataUnits.detect(bytes).convert(bytes);
+    }
+
+    pub fn detect(bytes: usize) DataUnits {
+        const kib = @intFromEnum(DataUnits.KiB);
+        const mib = @intFromEnum(DataUnits.MiB);
+        const gib = @intFromEnum(DataUnits.GiB);
+        const tib = @intFromEnum(DataUnits.TiB);
+
+        if (bytes <= kib) return .KiB;
+        if (bytes >= kib and bytes < mib) return .KiB;
+        if (bytes >= mib and bytes < gib) return .MiB;
+        if (bytes >= gib and bytes < tib) return .GiB;
+        if (bytes > gib) return .TiB;
+        return .B;
+    }
+
+    pub fn convert(self: DataUnits, bytes: usize) f64 {
+        const b: f64 = @floatFromInt(bytes);
+        return if (self == .B) b else b / @as(f64, @floatFromInt(@intFromEnum(self)));
+    }
+};
+
 const Winsize = extern struct {
     ws_row: c_ushort,
     ws_col: c_ushort,

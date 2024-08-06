@@ -1,6 +1,16 @@
 .{
     .name = "zigman",
-    .version = "0.0.1",
+    .version = "0.1.0",
+    .dependencies = .{
+        .clap = .{
+            .url = "git+https://github.com/Hejsil/zig-clap#c0193e9247335a6c1688b946325060289405de2a",
+            .hash = "12207ee987ce045596cb992cfb15b0d6d9456e50d4721c3061c69dabc2962053644d",
+        },
+        .@"zig-datetime" = .{
+            .url = "git+https://github.com/frmdstryr/zig-datetime.git#70aebf28fb3e137cd84123a9349d157a74708721",
+            .hash = "122077215ce36e125a490e59ec1748ffd4f6ba00d4d14f7308978e5360711d72d77f",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
